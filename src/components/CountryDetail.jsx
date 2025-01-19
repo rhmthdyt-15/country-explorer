@@ -15,45 +15,92 @@ const CountryDetail = () => {
     currency: false,
   });
   const [loadingTooltip, setLoadingTooltip] = useState(true);
+  const [error, setError] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
     const fetchCountryData = async () => {
       try {
+        setError(null);
+        setLoadingTooltip(true);
+
         const countryData = await getCountryDetails(countryName);
         setCountry(countryData);
 
         if (countryData.idd && countryData.currencies) {
           const callingCode =
-            countryData.idd.root + countryData.idd.suffixes[0];
+            countryData.idd.root + (countryData.idd.suffixes?.[0] || "");
           const currency = Object.keys(countryData.currencies)[0];
 
-          console.log("Currency Code:", currency); // Log kode mata uang
+          const [callingCodeCountries, currencyCountries] =
+            await Promise.allSettled([
+              getCountriesByCallingCode(callingCode),
+              getCountriesByCurrency(currency),
+            ]);
 
-          const [callingCodeCountries, currencyCountries] = await Promise.all([
-            getCountriesByCallingCode(callingCode),
-            getCountriesByCurrency(currency),
-          ]);
-
-          console.log("Currency Countries:", currencyCountries); // Log data
-
-          // Ambil nama negara dari currencyCountries
           setTooltip({
-            callingCodeCountries: callingCodeCountries.map(
-              (c) => c.name.common
-            ),
-            currencyCountries: currencyCountries.map((c) => c.name), // Pastikan ini sesuai
+            callingCodeCountries:
+              callingCodeCountries.status === "fulfilled"
+                ? callingCodeCountries.value?.map((c) => c.name.common)
+                : [],
+            currencyCountries:
+              currencyCountries.status === "fulfilled"
+                ? currencyCountries.value?.map((c) => c.name.common)
+                : [],
           });
         }
-      } catch (error) {
-        console.error("Error fetching country data:", error);
+      } catch (err) {
+        console.error("Error fetching data:", err);
+        setError(err.message || "Failed to load country data");
       } finally {
         setLoadingTooltip(false);
       }
     };
 
-    fetchCountryData();
+    if (countryName) {
+      fetchCountryData();
+    }
+
+    return () => {
+      setCountry(null);
+      setTooltip(null);
+      setError(null);
+    };
   }, [countryName]);
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-white p-8">
+        <div className="mx-auto max-w-5xl">
+          <button
+            onClick={() => navigate("/")}
+            className="mb-8 flex items-center gap-2 rounded-xl bg-[#7C3AED] px-6 py-3 text-white hover:bg-purple-700"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M19 12H5M5 12L12 19M5 12L12 5"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            Back to Homepage
+          </button>
+          <div className="rounded-xl bg-red-50 p-6">
+            <h2 className="mb-2 text-lg font-semibold text-red-800">Error</h2>
+            <p className="text-red-600">{error}</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-4 rounded-lg bg-red-100 px-4 py-2 text-red-700 hover:bg-red-200"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-white p-8">
@@ -76,7 +123,14 @@ const CountryDetail = () => {
           Back to Homepage
         </button>
 
-        {country ? (
+        {!country && !error ? (
+          <div className="flex h-64 items-center justify-center">
+            <div className="text-center">
+              <div className="mb-4 h-8 w-8 animate-spin rounded-full border-4 border-[#7C3AED] border-t-transparent"></div>
+              <p className="text-gray-500">Loading country details...</p>
+            </div>
+          </div>
+        ) : country ? (
           <div className="space-y-8">
             {/* Header */}
             <div className="space-y-4">
@@ -86,10 +140,14 @@ const CountryDetail = () => {
                   src={country.flags.svg}
                   alt={`${country.name.common} flag`}
                   className="h-6"
+                  onError={(e) => {
+                    e.target.onerror = null;
+                    e.target.src = "/placeholder-flag.png";
+                  }}
                 />
               </div>
-              <div className="flex gap-2">
-                {country.altSpellings.map((spelling, index) => (
+              <div className="flex flex-wrap gap-2">
+                {country.altSpellings?.map((spelling, index) => (
                   <span
                     key={index}
                     className="rounded-full bg-[#99E6E6] px-4 py-1 text-sm"
@@ -101,7 +159,7 @@ const CountryDetail = () => {
             </div>
 
             {/* Main Content */}
-            <div className="grid grid-cols-2 gap-8">
+            <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
               {/* Left Column */}
               <div className="space-y-8">
                 {/* LatLong Section */}
@@ -109,13 +167,14 @@ const CountryDetail = () => {
                   <div className="relative z-10">
                     <h3 className="mb-2 text-gray-600">LatLong</h3>
                     <p className="text-4xl font-bold text-[#7C3AED]">
-                      {country.latlng[0]}, {country.latlng[1]}
+                      {country.latlng?.[0]}, {country.latlng?.[1]}
                     </p>
                   </div>
                   <img
                     src="/images/globe1.png"
                     alt="Map Background"
                     className="absolute right-0 top-0 h-full w-1/2 opacity-10"
+                    onError={(e) => (e.target.style.display = "none")}
                   />
                 </div>
 
@@ -123,10 +182,10 @@ const CountryDetail = () => {
                 <div className="rounded-2xl bg-white p-8 shadow-lg">
                   <h3 className="mb-2 text-gray-600">Calling Code</h3>
                   <p className="mb-2 text-4xl font-bold text-[#7C3AED]">
-                    {country.idd?.root.replace("+", "")}
-                    {country.idd?.suffixes[0]}
+                    {country.idd?.root}
+                    {country.idd?.suffixes?.[0]}
                   </p>
-                  {!loadingTooltip && tooltip && (
+                  {!loadingTooltip && tooltip?.callingCodeCountries && (
                     <div
                       className="relative"
                       onMouseEnter={() =>
@@ -137,15 +196,24 @@ const CountryDetail = () => {
                       }
                     >
                       <button className="text-sm text-[#7C3AED] underline">
-                        {tooltip.callingCodeCountries.length} country
+                        {tooltip.callingCodeCountries.length}{" "}
+                        {tooltip.callingCodeCountries.length === 1
+                          ? "country"
+                          : "countries"}
                       </button>{" "}
                       with this calling code
                       {showTooltip.calling && (
                         <div className="absolute left-0 top-full z-10 mt-2 w-64 rounded-xl bg-gray-700 p-4 shadow-lg">
                           <ul className="space-y-1 text-sm text-white">
-                            {tooltip.callingCodeCountries.map((name, index) => (
-                              <li key={name + index}>{name}</li> // Menggunakan name + index sebagai key
-                            ))}
+                            {tooltip.callingCodeCountries.length > 0 ? (
+                              tooltip.callingCodeCountries.map(
+                                (name, index) => (
+                                  <li key={`${name}-${index}`}>{name}</li>
+                                )
+                              )
+                            ) : (
+                              <li>No other countries found</li>
+                            )}
                           </ul>
                         </div>
                       )}
@@ -158,14 +226,17 @@ const CountryDetail = () => {
               <div className="space-y-8">
                 {/* Region Info */}
                 <div className="rounded-2xl bg-white p-8 shadow-lg">
-                  <p>
-                    Capital: <strong>{country.capital?.[0] || "N/A"}</strong>
+                  <p className="mb-2">
+                    <span className="text-gray-600">Capital:</span>{" "}
+                    <strong>{country.capital?.[0] || "N/A"}</strong>
+                  </p>
+                  <p className="mb-2">
+                    <span className="text-gray-600">Region:</span>{" "}
+                    <strong>{country.region || "N/A"}</strong>
                   </p>
                   <p>
-                    Region: <strong>{country.region}</strong>
-                  </p>
-                  <p>
-                    Subregion: <strong>{country.subregion}</strong>
+                    <span className="text-gray-600">Subregion:</span>{" "}
+                    <strong>{country.subregion || "N/A"}</strong>
                   </p>
                 </div>
 
@@ -175,7 +246,7 @@ const CountryDetail = () => {
                   <p className="mb-2 text-4xl font-bold text-[#7C3AED]">
                     {Object.keys(country.currencies || {})[0]}
                   </p>
-                  {!loadingTooltip && tooltip && (
+                  {!loadingTooltip && tooltip?.currencyCountries && (
                     <div
                       className="relative"
                       onMouseEnter={() =>
@@ -186,20 +257,21 @@ const CountryDetail = () => {
                       }
                     >
                       <button className="text-sm text-[#7C3AED] underline">
-                        {tooltip.currencyCountries.length} country
+                        {tooltip.currencyCountries.length}{" "}
+                        {tooltip.currencyCountries.length === 1
+                          ? "country"
+                          : "countries"}
                       </button>{" "}
                       with this currency
                       {showTooltip.currency && (
                         <div className="absolute left-0 top-full z-10 mt-2 w-64 rounded-xl bg-gray-700 p-4 shadow-lg">
                           <ul className="space-y-1 text-sm text-white">
                             {tooltip.currencyCountries.length > 0 ? (
-                              tooltip.currencyCountries.map(
-                                (country, index) => (
-                                  <li key={country + index}>{country}</li> // Menggunakan country + index sebagai key
-                                )
-                              )
+                              tooltip.currencyCountries.map((name, index) => (
+                                <li key={`${name}-${index}`}>{name}</li>
+                              ))
                             ) : (
-                              <li>No countries found</li> // Menangani kasus di mana tidak ada negara
+                              <li>No other countries found</li>
                             )}
                           </ul>
                         </div>
@@ -210,11 +282,7 @@ const CountryDetail = () => {
               </div>
             </div>
           </div>
-        ) : (
-          <div className="flex h-64 items-center justify-center">
-            <p className="text-gray-500">Loading country details...</p>
-          </div>
-        )}
+        ) : null}
       </div>
     </div>
   );
